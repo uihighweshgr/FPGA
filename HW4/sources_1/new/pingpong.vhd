@@ -4,164 +4,146 @@ use IEEE.numeric_std.all;
 use IEEE.std_logic_unsigned.all;
 
 entity pingpong is
-port(
-	i_clk : in std_logic;
-	i_rst : in std_logic;
-	btn_l : in std_logic;
-	btn_r : in std_logic;
-	btn_s : in std_logic;
-	LED   : out std_logic_vector(7 downto 0)
-	);
-
+    port(
+           i_clk            : in STD_LOGIC;
+           i_rst            : in STD_LOGIC;
+           i_left_button    : in STD_LOGIC; --s5
+           i_right_button   : in STD_LOGIC; --s9
+           o_count          : out STD_LOGIC_VECTOR(7 downto 0)     
+        );   
 end pingpong;
 
 architecture Behavioral of pingpong is
-	signal ball    : std_logic_vector(7 downto 0);
-	signal score_l : std_logic_vector(3 downto 0);
-	signal score_r : std_logic_vector(3 downto 0);
-	type   state_type is (initial,move_left,move_right,win_l,win_r);
-	signal state   : state_type;
-	signal pre_state : state_type;
-	
-	signal div        : std_logic_vector(24 downto 0);
-    signal e_clk    : std_logic;
-    
-    signal i : integer range 0 to 30;
-    signal i2 : integer range 0 to 3;
-    signal lfsr : std_logic_vector (1 downto 0);
-    signal feedback : std_logic;
-    signal v_clk : std_logic;
-	
-
+signal count            : STD_LOGIC_VECTOR(7 downto 0);
+signal right_score      : STD_LOGIC_VECTOR(3 downto 0);
+signal left_score       : STD_LOGIC_VECTOR(3 downto 0);
+signal divclk           :STD_LOGIC_VECTOR(26 downto 0);
+signal led_clk          :STD_LOGIC;
+type counter_state is (reserve,counter_is_counting_left, counter_is_counting_right,left_win,right_win,left_ready_serve,right_ready_serve);
+signal counter_move_state: counter_state;
+signal prestate: counter_state;
 begin
-LED <= ball;
 
+o_count <= count;
 
-fsm : process(i_clk, i_rst, btn_l, btn_r, btn_s)  --i_clk
+led_move_state :process (i_clk , i_rst , i_left_button , i_right_button)
 begin
-	if i_rst = '1' then
-		state <= initial;
-	elsif rising_edge(i_clk) then
-		pre_state <= state;
-		case state is
-			when initial =>
-				if btn_l = '1' then
-					state <= move_right;
-				end if;
-			when move_right =>
-				if ball = "10000000" and btn_r = '1' then
-					state <= move_left;
-					
-                elsif (ball = "00000000") or (ball > "00000001" and btn_r = '1') then
-				    state <= win_l;
-				end if;
-			when move_left =>
-				if ball = "00000001" and btn_l = '1' then
-					state <= move_right;
-					
-                elsif (ball = "00000000") or (ball > "10000000" and btn_l = '1') then
-				    state <= win_r;
-				end if;
-			when win_l =>
-				if score_l = "0100" then
-					state <= initial;
-				else
-					if btn_l = '1' then
-						state <= move_right;
-					end if;
-				end if;
-			when win_r =>
-				if score_r = "0100" then
-					state <= initial;
-				else
-					if btn_r = '1' then
-						state <= move_left;
-					end if;
-				end if;
-		end case;
-	end if;
-end process;
-
-led_show : process(v_clk, i_rst, btn_l, btn_r, btn_s)  --e_clk
-begin
-	if i_rst = '1' then
-		ball <= "00000001";
-	elsif rising_edge(v_clk) then
-		case state is
-			when initial =>
-				ball <= "00000001";
-			when move_right =>
-				ball <= ball(6 downto 0) & '0';
-			when move_left =>
-				ball <= '0' & ball(7 downto 1);
-			when win_l =>
-				if btn_s = '1' then
-					ball <= score_r & score_l;
-				else
-					ball <= "00000001";
-				end if;
-			when win_r =>
-				if btn_s = '1' then
-					ball <= score_r & score_l;
-				else
-					ball <= "10000000";
-				end if;
-		end case;
-	end if;
-end process;
-
-score : process(i_clk, i_rst, btn_l, btn_r, btn_s)  --i_clk
-begin
-	if i_rst = '1' then
-		score_l <= "0000";
-		score_r <= "0000";
-	elsif rising_edge(i_clk) then
-		case state is
-			when initial =>
-                score_l <= "0000";
-				score_r <= "0000";
-			when move_right =>
-				null;
-			when move_left =>
+    if  i_rst = '0'  then --初始右發球
+            counter_move_state <= reserve;
+    elsif i_clk' event and i_clk = '1' then
+        prestate <= counter_move_state;
+        case counter_move_state is 
+            when counter_is_counting_left =>
+                if (count = "10000000") and (i_left_button = '1') then --左打到
+                    counter_move_state <= counter_is_counting_right;             
+                elsif (i_left_button = '0' and count = "00000000") or (count<"10000000" and i_left_button='1') then --左沒打到
+                    counter_move_state <= right_win;   
+                end if;                   
+            when counter_is_counting_right =>
+                if (count = "00000001") and (i_right_button = '1') then --右打到
+                    counter_move_state <= counter_is_counting_left;
+                elsif (i_right_button = '0' and count = "00000000") or (i_right_button = '1' and count > "00000001") then --右沒打到
+                    counter_move_state <= left_win;
+                end if;    
+            when right_win =>
+                if count = (left_score(0)&left_score(1)&left_score(2)&left_score(3)) & right_score then
+                    counter_move_state <= reserve;
+                end if;
+                --if i_left_button = '1' then --左預備發球
+                --    counter_move_state <= left_ready_serve;
+                --end if;                           
+            when left_win =>
+                if count = (left_score(0)&left_score(1)&left_score(2)&left_score(3)) & right_score then
+                    counter_move_state <= reserve;
+                end if;
+            when left_ready_serve =>
+                if count = "10000000" then --左發球
+                    counter_move_state <= counter_is_counting_right;
+                end if;                           
+            when right_ready_serve =>
+                if count = "00000001" then --右發球
+                    counter_move_state <= counter_is_counting_left;
+                end if;
+            when reserve =>
+                if i_left_button = '1' then
+                    counter_move_state <= left_ready_serve;
+                elsif i_right_button = '1' then 
+                    counter_move_state <= right_ready_serve;
+                else
+                    counter_move_state <= reserve;
+                end if;
+            when others =>
                 null;
-			when win_l =>
-			    if pre_state = move_right then
-					score_l <= score_l + '1';
-				else 
-					score_l <= score_l;
-				end if;
-			when win_r =>
-				if pre_state = move_left then
-					score_r <= score_r + '1';
-				else 
-					score_r <= score_r;
-				end if;
-		end case;
-	end if;
-end process;
-
-div_clk : process(i_clk, i_rst)
-begin
-    if i_rst = '1' then
-        div <= (others => '0');
-    elsif rising_edge(i_clk) then
-        div <= div + 1;
+        end case;
     end if;
 end process;
-e_clk <= div(24);
 
-process(e_clk, i_rst)
+counter :process (i_clk , i_rst)
 begin
-    if i_rst = '1' then
-        lfsr <= "01";
-        i <= 0;
-        i2 <= 0;
-    elsif rising_edge(e_clk) then
-        feedback <= lfsr(1) xor lfsr(0);
-        lfsr    <= feedback & lfsr(1);
-        i2      <= to_integer(signed(lfsr));
-        i <= i2 + 23;
+    if i_rst = '0' then
+        count <= "00000000";--count初始直 
+    elsif led_clk' event and led_clk = '1' then
+        case counter_move_state is 
+            when counter_is_counting_left =>
+                count <= count(6 downto 0) & '0'; --左移
+            when counter_is_counting_right =>
+                count <= '0' & count(7 downto 1); --右移
+            when right_win =>
+                count <= (left_score(0)&left_score(1)&left_score(2)&left_score(3)) & right_score; --看分數                         
+            when left_win =>    
+                count <= (left_score(0)&left_score(1)&left_score(2)&left_score(3)) & right_score;  --看分數
+            when left_ready_serve =>
+                count <= "10000000"; --左初始直                          
+            when right_ready_serve =>
+                count <= "00000001"; --右初始直
+            when others =>
+                null;
+        end case;
+    end if;                
+end process;
+
+count_score : process (i_clk, i_rst)
+begin
+    if i_rst = '0' then
+        right_score <= "0000"; -- 初始化 score
+        left_score  <= "0000"; 
+    elsif i_clk' event and i_clk = '1' then
+        case counter_move_state is  
+            when counter_is_counting_left =>
+                null; 
+            when counter_is_counting_right =>
+                null; 
+            when right_win =>
+                if prestate = counter_is_counting_left then
+                
+                    right_score <= right_score + '1'; --right_win  
+                else
+                    right_score <= right_score;
+                end if;
+            when left_win =>    
+                if prestate = counter_is_counting_right then                
+                    left_score <= left_score + '1'; --right_win  
+                else
+                    left_score <= left_score;
+                end if;
+            when left_ready_serve =>
+                null;                         
+            when right_ready_serve =>
+                null;
+            when others =>
+                null;             
+        end case;    
     end if;
 end process;
-v_clk <= div(i);
+
+fd:process(i_clk ,i_rst)
+begin
+if i_rst = '0' then 
+    divclk <= (others => '0');
+elsif rising_edge(i_clk) then
+    divclk <= divclk +1 ;
+end if;
+end process fd;
+led_clk <= divclk(24);
+
 end Behavioral;
